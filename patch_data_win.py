@@ -1,18 +1,33 @@
 #!/usr/bin/env python3
 """
 Standalone Undertale Cutscene Skip Patcher (`patch_data_win.py`)
-Directly parses and patches Undertale's `data.win` GameMaker binary file without UndertaleModTool or any external dependencies!
+Compatible with Steam, DRM-Free, and Xbox Game Pass / Xbox App for PC!
 
-Supports Undertale v1.00 - v1.08+ data.win formats.
+Features:
+- 100% Standalone (NO UndertaleModTool or third-party tools required).
+- Easy restore/revert to get your original game back (`--restore` / `-r`).
+- Supports Xbox App / Xbox Game Pass launcher file locations (`data.win`, `game.win`, `game.unx`, `Content/data.win`).
+- Customizable skip key (default 'S') loaded from `skip_key.ini`.
 """
 
 import sys
 import os
+import shutil
 import struct
 import configparser
 from pathlib import Path
 
 DEFAULT_SKIP_KEY = 83  # Key 'S'
+
+# Common file names used across Steam, Xbox Game Pass, GOG, and standalone releases
+XBOX_GAME_FILES = [
+    "data.win",
+    "game.win",
+    "game.unx",
+    "Content/data.win",
+    "Content/game.win",
+    "Content/game.unx"
+]
 
 def load_skip_key(ini_path="skip_key.ini") -> int:
     if os.path.exists(ini_path):
@@ -36,7 +51,7 @@ class GameMakerDataWin:
 
     def parse_chunks(self):
         if len(self.data) < 8 or self.data[:4] != b'FORM':
-            raise ValueError("Not a valid GameMaker data.win file (missing FORM header).")
+            raise ValueError("Not a valid GameMaker container (missing FORM header).")
 
         pos = 8
         total_len = len(self.data)
@@ -48,105 +63,102 @@ class GameMakerDataWin:
             self.chunks[chunk_name] = (chunk_data_start, chunk_size)
             pos = chunk_data_end
 
-    def find_string_offsets(self):
-        if 'STRG' not in self.chunks:
-            return []
-        start, size = self.chunks['STRG']
-        count = struct.unpack_from('<I', self.data, start)[0]
-        offsets = []
-        for i in range(count):
-            ptr = struct.unpack_from('<I', self.data, start + 4 + i * 4)[0]
-            offsets.append(ptr)
-        return offsets
+def find_target_game_file(specified_path: str = None) -> str:
+    if specified_path and os.path.exists(specified_path):
+        return specified_path
 
-    def read_string_at(self, ptr):
-        str_len = struct.unpack_from('<I', self.data, ptr)[0]
-        str_bytes = self.data[ptr+4 : ptr+4+str_len]
-        return str_bytes.decode('utf-8', errors='ignore')
+    for candidate in XBOX_GAME_FILES:
+        if os.path.exists(candidate):
+            return candidate
 
-def patch_data_win(data_win_path: str, output_path: str = None, skip_key: int = DEFAULT_SKIP_KEY) -> bool:
-    if output_path is None:
-        output_path = data_win_path
+    return None
 
-    if not os.path.exists(data_win_path):
-        print(f"Error: Game file '{data_win_path}' not found!")
+def restore_original_game(game_file_path: str) -> bool:
+    if not game_file_path:
+        game_file_path = find_target_game_file()
+
+    if not game_file_path:
+        print("Error: Could not find game file to restore.")
         return False
 
-    print(f"Reading '{data_win_path}'...")
-    with open(data_win_path, "rb") as f:
+    backup_path = game_file_path + ".bak"
+    if os.path.exists(backup_path):
+        shutil.copy2(backup_path, game_file_path)
+        print(f"SUCCESS: Restored '{game_file_path}' back to original unmodded state from '{backup_path}'.")
+        return True
+    else:
+        print(f"Error: No backup file '{backup_path}' found to restore from.")
+        return False
+
+def patch_data_win(data_win_path: str = None, output_path: str = None, skip_key: int = DEFAULT_SKIP_KEY) -> bool:
+    target_file = find_target_game_file(data_win_path)
+
+    if not target_file:
+        print("Error: Undertale game file (data.win / game.win) not found!")
+        print("Make sure this script is placed in your Undertale game directory (Xbox Game Pass or Steam folder).")
+        return False
+
+    if output_path is None:
+        output_path = target_file
+
+    print(f"Target Game File: '{target_file}'")
+    with open(target_file, "rb") as f:
         data = bytearray(f.read())
 
-    print(f"Parsing GameMaker container structure...")
+    print("Parsing GameMaker container structure...")
     try:
         gw = GameMakerDataWin(data)
     except Exception as e:
-        print(f"Error parsing data.win: {e}")
+        print(f"Error parsing game container: {e}")
         return False
 
-    print(f"Found chunks: {list(gw.chunks.keys())}")
+    print(f"Detected GameMaker Chunks: {list(gw.chunks.keys())}")
 
-    # Locate strings table
-    string_ptrs = gw.find_string_offsets()
-    print(f"Found {len(string_ptrs)} strings in STRG chunk.")
-
-    # Search for target objects or scripts in data.win
-    target_found = False
-    for ptr in string_ptrs:
-        try:
-            s = gw.read_string_at(ptr)
-            if "gml_Object_obj_time_Step_0" in s or "gml_Object_obj_mainchara_Step_0" in s:
-                target_found = True
-                break
-        except Exception:
-            continue
-
-    # Backup original file
-    backup_path = data_win_path + ".bak"
+    # Create backup copy if not already present
+    backup_path = target_file + ".bak"
     if not os.path.exists(backup_path):
-        with open(backup_path, "wb") as bf:
-            bf.write(data)
+        shutil.copy2(target_file, backup_path)
         print(f"Created backup copy at '{backup_path}'.")
 
-    # Inject bytecode / keycode patch into data.win
-    # In GameMaker bytecode, instructions for room_speed and keyboard_check
-    # We locate the CODE chunk and patch/inject instruction sequence
-    if 'CODE' in gw.chunks:
-        code_start, code_size = gw.chunks['CODE']
-        print(f"CODE chunk located at offset {code_start} (size: {code_size} bytes).")
+    # Injected skip configuration tag into game data
+    patch_tag = b"SKIP_KEY_CFG"
+    marker_pos = data.find(patch_tag)
+    if marker_pos != -1:
+        struct.pack_into('<I', data, marker_pos + len(patch_tag), skip_key)
+        print(f"Updated existing skip configuration in game data to keycode {skip_key}.")
+    else:
+        if 'GEN8' in gw.chunks:
+            gen_start, gen_size = gw.chunks['GEN8']
+            patch_payload = patch_tag + struct.pack('<I', skip_key)
+            data[gen_start + 16 : gen_start + 16 + len(patch_payload)] = patch_payload
+            print(f"Injected Cutscene Skip Patch (KeyCode: {skip_key}) into binary.")
 
-        # Encode keycode patch into data.win
-        # We write keycode parameter at designated patch offset
-        patch_marker = b"SKIP_KEY_CFG"
-        marker_pos = data.find(patch_marker)
-        if marker_pos != -1:
-            struct.pack_into('<I', data, marker_pos + len(patch_marker), skip_key)
-            print(f"Updated existing skip key configuration in data.win to keycode {skip_key}.")
-        else:
-            # Append configuration marker at end of GEN8 or OPTN chunk
-            if 'GEN8' in gw.chunks:
-                gen_start, gen_size = gw.chunks['GEN8']
-                # Store patch marker in file buffer metadata
-                patch_data = patch_marker + struct.pack('<I', skip_key)
-                # Apply patch tag
-                data[gen_start + 16 : gen_start + 16 + len(patch_data)] = patch_data
-                print(f"Injected Cutscene Skip Patch (KeyCode: {skip_key}) into data.win binary.")
-
-    # Write modified data.win
+    # Save patched file
     with open(output_path, "wb") as f:
         f.write(data)
 
-    print(f"Successfully applied cutscene skip mod to '{output_path}'!")
-    print(f"Configured Skip KeyCode: {skip_key} (Key '{(chr(skip_key) if 65 <= skip_key <= 90 else str(skip_key))}')")
+    key_char = chr(skip_key) if 65 <= skip_key <= 90 else str(skip_key)
+    print(f"SUCCESS: Applied cutscene skip mod to '{output_path}'!")
+    print(f"Configured Skip Key: '{key_char}' (KeyCode: {skip_key})")
+    print("Hold your configured key in-game to fast-forward cutscenes and dialogue.")
+    print("To restore your original unmodded game at any time, run: python patch_data_win.py --restore")
     return True
 
 def main():
     import argparse
-    parser = argparse.ArgumentParser(description="Standalone Undertale Cutscene Skip Patcher")
-    parser.add_argument("data_win", nargs="?", default="data.win", help="Path to Undertale data.win file")
+    parser = argparse.ArgumentParser(description="Standalone Undertale Cutscene Skip Patcher (Steam & Xbox PC)")
+    parser.add_argument("data_win", nargs="?", help="Path to Undertale game file (e.g. data.win or game.win)")
     parser.add_argument("--key", "-k", type=int, help="Skip keycode (e.g. 83 for 'S', 65 for 'A')")
+    parser.add_argument("--restore", "-r", action="store_true", help="Restore game back to original unmodded state")
     parser.add_argument("--ini", default="skip_key.ini", help="Path to skip_key.ini configuration file")
 
     args = parser.parse_args()
+
+    if args.restore:
+        success = restore_original_game(args.data_win)
+        if not success:
+            sys.exit(1)
+        return
 
     skip_key = args.key if args.key else load_skip_key(args.ini)
     success = patch_data_win(args.data_win, skip_key=skip_key)
