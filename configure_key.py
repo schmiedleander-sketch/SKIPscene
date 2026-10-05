@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Standalone Key Configuration Utility for SKIPscene Undertale Mod.
-Allows easy selection and swapping of the cutscene skip key.
+Standalone Key & Mod Configuration Utility for SKIPscene Undertale Mod.
+Allows easy selection of cutscene skip key, death gambling settings, and mysterious phone number options.
 No external dependencies required (uses built-in standard Python modules).
 """
 
@@ -46,27 +46,60 @@ def get_key_code(key_str: str) -> int:
     raise ValueError(f"Unknown or unsupported key: '{key_str}'")
 
 def main():
-    parser = argparse.ArgumentParser(description="Configure cutscene skip key for Undertale.")
+    parser = argparse.ArgumentParser(description="Configure cutscene skip, gambling, and mysterious number settings for Undertale.")
     parser.add_argument('--key', '-k', type=str, help="Key to assign for skipping (e.g. S, A, Z, X, Space, Shift, 83)")
     parser.add_argument('--speed', '-s', type=int, help="Fast forward room speed (default 300)")
+    parser.add_argument('--gambling', type=int, choices=[0, 1], help="Enable (1) or disable (0) gambling upon death")
+    parser.add_argument('--item-penalty', type=int, choices=[0, 1], help="Enable (1) or disable (0) losing 1 item on failed gamble")
+    parser.add_argument('--mysterious-call', type=int, choices=[0, 1], help="Enable (1) or disable (0) calling mysterious number")
+    parser.add_argument('--number', type=int, help="Set mysterious phone number (e.g. 666)")
     parser.add_argument('--ini', type=str, default="skip_key.ini", help="Path to skip_key.ini file")
 
     args = parser.parse_args()
     ini_path = Path(args.ini)
     config = load_ini(ini_path)
 
+    has_cli_updates = False
+
     if args.key:
         try:
             code = get_key_code(args.key)
             config['Settings']['SkipKey'] = str(code)
             print(f"Updated SkipKey to '{args.key.upper()}' (KeyCode: {code}) in {ini_path.name}")
+            has_cli_updates = True
         except ValueError as e:
             print(f"Error: {e}")
             sys.exit(1)
-    else:
+
+    if args.speed is not None:
+        config['Settings']['FastForwardSpeed'] = str(args.speed)
+        print(f"Updated FastForwardSpeed to {args.speed}")
+        has_cli_updates = True
+
+    if args.gambling is not None:
+        config['Settings']['EnableGamblingOnDeath'] = str(args.gambling)
+        print(f"Updated EnableGamblingOnDeath to {args.gambling}")
+        has_cli_updates = True
+
+    if args.item_penalty is not None:
+        config['Settings']['GambleItemLossPenalty'] = str(args.item_penalty)
+        print(f"Updated GambleItemLossPenalty to {args.item_penalty}")
+        has_cli_updates = True
+
+    if args.mysterious_call is not None:
+        config['Settings']['EnableCallMysteriousNumber'] = str(args.mysterious_call)
+        print(f"Updated EnableCallMysteriousNumber to {args.mysterious_call}")
+        has_cli_updates = True
+
+    if args.number is not None:
+        config['Settings']['MysteriousNumber'] = str(args.number)
+        print(f"Updated MysteriousNumber to {args.number}")
+        has_cli_updates = True
+
+    if not has_cli_updates and len(sys.argv) == 1:
         current_code = config['Settings'].get('SkipKey', '83')
         print(f"Current SkipKey Code: {current_code}")
-        user_input = input("Enter new key (e.g. S, A, Z, X, Space, Shift) or keycode: ").strip()
+        user_input = input("Enter new key (e.g. S, A, Z, X, Space, Shift) or keycode (press Enter to skip): ").strip()
         if user_input:
             try:
                 code = get_key_code(user_input)
@@ -75,10 +108,6 @@ def main():
             except ValueError as e:
                 print(f"Error: {e}")
                 sys.exit(1)
-
-    if args.speed:
-        config['Settings']['FastForwardSpeed'] = str(args.speed)
-        print(f"Updated FastForwardSpeed to {args.speed}")
 
     save_ini(config, ini_path)
 
