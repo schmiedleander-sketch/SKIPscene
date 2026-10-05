@@ -6,7 +6,7 @@ Compatible with Steam, DRM-Free, and Xbox Game Pass / Xbox App for PC!
 Features:
 - 100% Standalone (NO UndertaleModTool or third-party tools required).
 - Easy restore/revert to get your original game back (`--restore` / `-r`).
-- Supports Xbox App / Xbox Game Pass launcher file locations (`data.win`, `game.win`, `game.unx`, `Content/data.win`).
+- Supports Xbox App / Xbox Game Pass launcher file locations.
 - Cutscene & Dialogue Skip key configuration.
 - Death Gambling Feature: Gamble upon death to respawn; losing forfeits 1 item.
 - Mysterious Number Calling Feature: Phone / call the mysterious number.
@@ -16,8 +16,8 @@ import sys
 import os
 import shutil
 import struct
+import argparse
 import configparser
-from pathlib import Path
 
 DEFAULT_SKIP_KEY = 83  # Key 'S'
 DEFAULT_ENABLE_GAMBLING = 1
@@ -35,7 +35,9 @@ XBOX_GAME_FILES = [
     "Content/game.unx"
 ]
 
+
 def load_mod_config(ini_path="skip_key.ini") -> dict:
+    """Load mod configuration settings from skip_key.ini file."""
     cfg = {
         'skip_key': DEFAULT_SKIP_KEY,
         'enable_gambling': DEFAULT_ENABLE_GAMBLING,
@@ -47,30 +49,45 @@ def load_mod_config(ini_path="skip_key.ini") -> dict:
         config = configparser.ConfigParser(inline_comment_prefixes=(';', '#'))
         config.optionxform = str
         try:
-            config.read(ini_path)
+            config.read(ini_path, encoding='utf-8')
             if 'Settings' in config:
                 sec = config['Settings']
                 if 'SkipKey' in sec and sec['SkipKey'].strip().isdigit():
                     cfg['skip_key'] = int(sec['SkipKey'].strip())
-                if 'EnableGamblingOnDeath' in sec and sec['EnableGamblingOnDeath'].strip().isdigit():
+                if (
+                    'EnableGamblingOnDeath' in sec
+                    and sec['EnableGamblingOnDeath'].strip().isdigit()
+                ):
                     cfg['enable_gambling'] = int(sec['EnableGamblingOnDeath'].strip())
-                if 'GambleItemLossPenalty' in sec and sec['GambleItemLossPenalty'].strip().isdigit():
+                if (
+                    'GambleItemLossPenalty' in sec
+                    and sec['GambleItemLossPenalty'].strip().isdigit()
+                ):
                     cfg['item_penalty'] = int(sec['GambleItemLossPenalty'].strip())
-                if 'EnableCallMysteriousNumber' in sec and sec['EnableCallMysteriousNumber'].strip().isdigit():
-                    cfg['enable_mysterious_call'] = int(sec['EnableCallMysteriousNumber'].strip())
+                if (
+                    'EnableCallMysteriousNumber' in sec
+                    and sec['EnableCallMysteriousNumber'].strip().isdigit()
+                ):
+                    cfg['enable_mysterious_call'] = int(
+                        sec['EnableCallMysteriousNumber'].strip()
+                    )
                 if 'MysteriousNumber' in sec and sec['MysteriousNumber'].strip().isdigit():
                     cfg['mysterious_number'] = int(sec['MysteriousNumber'].strip())
-        except Exception as e:
+        except (configparser.Error, OSError, ValueError) as e:
             print(f"Warning: Could not parse {ini_path}: {e}")
     return cfg
 
-class GameMakerDataWin:
+
+class GameMakerDataWin:  # pylint: disable=too-few-public-methods
+    """Parser for GameMaker Studio container data."""
+
     def __init__(self, data: bytearray):
         self.data = data
         self.chunks = {}
         self.parse_chunks()
 
     def parse_chunks(self):
+        """Parse chunk offsets from FORM header container."""
         if len(self.data) < 8 or self.data[:4] != b'FORM':
             raise ValueError("Not a valid GameMaker container (missing FORM header).")
 
@@ -84,7 +101,9 @@ class GameMakerDataWin:
             self.chunks[chunk_name] = (chunk_data_start, chunk_size)
             pos = chunk_data_end
 
+
 def find_target_game_file(specified_path: str = None) -> str:
+    """Find Undertale game binary file in workspace directory."""
     if specified_path and os.path.exists(specified_path):
         return specified_path
 
@@ -94,7 +113,9 @@ def find_target_game_file(specified_path: str = None) -> str:
 
     return None
 
+
 def restore_original_game(game_file_path: str = None) -> bool:
+    """Restore clean backup file to unmodded original state."""
     if not game_file_path:
         game_file_path = find_target_game_file()
 
@@ -105,13 +126,17 @@ def restore_original_game(game_file_path: str = None) -> bool:
     backup_path = game_file_path + ".bak"
     if os.path.exists(backup_path):
         shutil.copy2(backup_path, game_file_path)
-        print(f"SUCCESS: Restored '{game_file_path}' back to original unmodded state from '{backup_path}'.")
+        print(f"SUCCESS: Restored '{game_file_path}' from backup '{backup_path}'.")
         return True
-    else:
-        print(f"Error: No backup file '{backup_path}' found to restore from.")
-        return False
 
-def _patch_or_append_tag(data: bytearray, tag: bytes, payload_fmt: str, *payload_args) -> int:
+    print(f"Error: No backup file '{backup_path}' found to restore from.")
+    return False
+
+
+def _patch_or_append_tag(
+    data: bytearray, tag: bytes, payload_fmt: str, *payload_args
+) -> int:
+    """Update tag in bytearray if present or append tag and payload cleanly."""
     pos = data.find(tag)
     payload_bytes = struct.pack(payload_fmt, *payload_args)
     if pos != -1:
@@ -122,12 +147,16 @@ def _patch_or_append_tag(data: bytearray, tag: bytes, payload_fmt: str, *payload
     data.extend(tag_data)
     return len(data) - len(tag_data)
 
-def patch_data_win(data_win_path: str = None, output_path: str = None, config: dict = None) -> bool:
+
+def patch_data_win(
+    data_win_path: str = None, output_path: str = None, config: dict = None
+) -> bool:
+    """Apply mod patches to Undertale game file."""
     target_file = find_target_game_file(data_win_path)
 
     if not target_file:
         print("Error: Undertale game file (data.win / game.win) not found!")
-        print("Make sure this script is placed in your Undertale game directory (Xbox Game Pass or Steam folder).")
+        print("Make sure this script is placed in your Undertale game directory.")
         return False
 
     if output_path is None:
@@ -149,7 +178,7 @@ def patch_data_win(data_win_path: str = None, output_path: str = None, config: d
     print("Parsing GameMaker container structure...")
     try:
         gw = GameMakerDataWin(data)
-    except Exception as e:
+    except (ValueError, struct.error) as e:
         print(f"Error parsing game container: {e}")
         return False
 
@@ -168,7 +197,9 @@ def patch_data_win(data_win_path: str = None, output_path: str = None, config: d
     _patch_or_append_tag(data, b"GAMBLE_DEATH_CFG", '<II', enable_gambling, item_penalty)
 
     # 3. Call mysterious number config patch
-    _patch_or_append_tag(data, b"MYST_NUMBER_CFG", '<II', enable_mysterious_call, mysterious_number)
+    _patch_or_append_tag(
+        data, b"MYST_NUMBER_CFG", '<II', enable_mysterious_call, mysterious_number
+    )
 
     # Save patched file
     with open(output_path, "wb") as f:
@@ -177,22 +208,31 @@ def patch_data_win(data_win_path: str = None, output_path: str = None, config: d
     key_char = chr(skip_key) if 65 <= skip_key <= 90 else str(skip_key)
     print(f"\nSUCCESS: Applied Undertale mod patches to '{output_path}'!")
     print(f"  - Cutscene Skip Key: '{key_char}' (KeyCode: {skip_key})")
-    print(f"  - Death Gambling: {'Enabled' if enable_gambling else 'Disabled'} (Lose item penalty: {'Yes' if item_penalty else 'No'})")
-    print(f"  - Call Mysterious Number: {'Enabled' if enable_mysterious_call else 'Disabled'} (Number: {mysterious_number})")
-    print("\nTo restore your original unmodded game at any time, run: python patch_data_win.py --restore")
+    print(
+        f"  - Death Gambling: {'Enabled' if enable_gambling else 'Disabled'} "
+        f"(Lose item penalty: {'Yes' if item_penalty else 'No'})"
+    )
+    print(
+        f"  - Call Mysterious Number: {'Enabled' if enable_mysterious_call else 'Disabled'} "
+        f"(Number: {mysterious_number})"
+    )
+    print("\nTo restore your original unmodded game at any time, run: python patch_data_win.py -r")
     return True
 
+
 def main():
-    import argparse
-    parser = argparse.ArgumentParser(description="Standalone Undertale Mod Patcher (Steam & Xbox PC)")
-    parser.add_argument("data_win", nargs="?", help="Path to Undertale game file (e.g. data.win or game.win)")
-    parser.add_argument("--key", "-k", type=int, help="Skip keycode (e.g. 83 for 'S', 65 for 'A')")
-    parser.add_argument("--gambling", type=int, choices=[0, 1], help="Enable (1) or disable (0) gambling upon death")
-    parser.add_argument("--item-penalty", type=int, choices=[0, 1], help="Enable (1) or disable (0) item loss penalty on gamble loss")
-    parser.add_argument("--mysterious-call", type=int, choices=[0, 1], help="Enable (1) or disable (0) mysterious number phone calls")
-    parser.add_argument("--number", type=int, help="Set mysterious phone number (e.g. 666)")
-    parser.add_argument("--restore", "-r", action="store_true", help="Restore game back to original unmodded state")
-    parser.add_argument("--ini", default="skip_key.ini", help="Path to skip_key.ini configuration file")
+    """Main CLI entry point for mod patcher."""
+    parser = argparse.ArgumentParser(
+        description="Standalone Undertale Mod Patcher (Steam & Xbox PC)"
+    )
+    parser.add_argument("data_win", nargs="?", help="Path to Undertale game file")
+    parser.add_argument("--key", "-k", type=int, help="Skip keycode (e.g. 83 for 'S')")
+    parser.add_argument("--gambling", type=int, choices=[0, 1], help="Enable (1) / disable (0)")
+    parser.add_argument("--item-penalty", type=int, choices=[0, 1], help="Item loss penalty")
+    parser.add_argument("--mysterious-call", type=int, choices=[0, 1], help="Call mysterious num")
+    parser.add_argument("--number", type=int, help="Set mysterious phone number")
+    parser.add_argument("--restore", "-r", action="store_true", help="Restore original game")
+    parser.add_argument("--ini", default="skip_key.ini", help="Path to skip_key.ini file")
 
     args = parser.parse_args()
 
@@ -217,6 +257,7 @@ def main():
     success = patch_data_win(args.data_win, config=config)
     if not success:
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()

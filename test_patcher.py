@@ -8,23 +8,28 @@ import shutil
 import struct
 import unittest
 import tempfile
-from pathlib import Path
 
-from patch_data_win import patch_data_win, restore_original_game, load_mod_config, GameMakerDataWin
-import configure_key
+from patch_data_win import (
+    patch_data_win, restore_original_game, load_mod_config, GameMakerDataWin
+)
+
 
 class TestUndertalePatcher(unittest.TestCase):
+    """Test suite for Undertale binary patcher and configuration loading."""
+
     def setUp(self):
+        """Set up temporary test workspace."""
         self.temp_dir = tempfile.mkdtemp()
         self.data_win_path = os.path.join(self.temp_dir, "data.win")
         self.ini_path = os.path.join(self.temp_dir, "skip_key.ini")
         self._create_dummy_data_win(self.data_win_path)
 
     def tearDown(self):
+        """Tear down temporary test workspace."""
         shutil.rmtree(self.temp_dir)
 
     def _create_dummy_data_win(self, filepath):
-        # Create a valid minimal GameMaker FORM container with GEN8 chunk
+        """Helper to create dummy GameMaker FORM container."""
         gen8_body = bytearray(200)
         gen8_size = len(gen8_body)
 
@@ -37,12 +42,14 @@ class TestUndertalePatcher(unittest.TestCase):
             f.write(file_bytes)
 
     def test_gamemaker_parsing(self):
+        """Test GameMaker chunk header parsing."""
         with open(self.data_win_path, 'rb') as f:
             data = bytearray(f.read())
         gw = GameMakerDataWin(data)
         self.assertIn('GEN8', gw.chunks)
 
     def test_patch_and_restore(self):
+        """Test binary patching tags injection, updating, and backup restoration."""
         config = {
             'skip_key': 65,  # Key 'A'
             'enable_gambling': 1,
@@ -83,8 +90,17 @@ class TestUndertalePatcher(unittest.TestCase):
         self.assertNotIn(b'SKIP_KEY_CFG', restored_data)
 
     def test_ini_config_loading(self):
-        with open(self.ini_path, 'w') as f:
-            f.write("[Settings]\nSkipKey = 70\nEnableGamblingOnDeath = 1\nGambleItemLossPenalty = 0\nEnableCallMysteriousNumber = 1\nMysteriousNumber = 42\n")
+        """Test configuration loading from INI file."""
+        ini_content = (
+            "[Settings]\n"
+            "SkipKey = 70\n"
+            "EnableGamblingOnDeath = 1\n"
+            "GambleItemLossPenalty = 0\n"
+            "EnableCallMysteriousNumber = 1\n"
+            "MysteriousNumber = 42\n"
+        )
+        with open(self.ini_path, 'w', encoding='utf-8') as f:
+            f.write(ini_content)
 
         cfg = load_mod_config(self.ini_path)
         self.assertEqual(cfg['skip_key'], 70)
@@ -92,6 +108,7 @@ class TestUndertalePatcher(unittest.TestCase):
         self.assertEqual(cfg['item_penalty'], 0)
         self.assertEqual(cfg['enable_mysterious_call'], 1)
         self.assertEqual(cfg['mysterious_number'], 42)
+
 
 if __name__ == '__main__':
     unittest.main()
